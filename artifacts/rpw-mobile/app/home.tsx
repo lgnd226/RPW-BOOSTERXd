@@ -1,5 +1,5 @@
-import React from 'react';
-import { Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Image, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -7,6 +7,40 @@ import * as Haptics from 'expo-haptics';
 
 import { useApp } from '@/context/AppContext';
 import ToolCard, { type ToolDef } from '@/components/ToolCard';
+
+const APP_VERSION = '1.5.1';
+const API_BASE = (process.env['EXPO_PUBLIC_API_URL'] ?? 'https://rpw-booster-api.onrender.com/api/fb').replace('/api/fb', '');
+
+interface ReleaseInfo {
+  tag: string;
+  name: string;
+  url: string;
+  downloads: number;
+}
+
+function useLatestRelease() {
+  const [release, setRelease] = useState<ReleaseInfo | null>(null);
+  const [hasUpdate, setHasUpdate] = useState(false);
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/releases/latest`);
+        if (!r.ok) return;
+        const data = (await r.json()) as ReleaseInfo;
+        setRelease(data);
+        const remoteVersion = data.tag?.replace(/^v/, '').split('.').slice(0, 2).join('.');
+        const localVersion  = APP_VERSION.split('.').slice(0, 2).join('.');
+        const remoteNum = parseInt(data.tag?.replace(/\D/g, '') ?? '0', 10);
+        const localNum  = parseInt(APP_VERSION.replace(/\./g, ''), 10);
+        setHasUpdate(remoteNum > localNum);
+      } catch {}
+    };
+    check();
+  }, []);
+
+  return { release, hasUpdate };
+}
 
 const TOOLS: ToolDef[] = [
   { id: 'react',   title: 'Auto React',    subtitle: 'Boost reactions · 7 types',     icon: 'thumbs-up',     color: '#ef4444', glow: 'rgba(239,68,68,0.14)',   route: '/react-tool' },
@@ -20,6 +54,7 @@ export default function HomePage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { activeAccount, accounts, setActive } = useApp();
+  const { release, hasUpdate } = useLatestRelease();
 
   const displayName = activeAccount
     ? (activeAccount.name.startsWith('User ') ? `UID: ${activeAccount.uid}` : activeAccount.name)
@@ -28,6 +63,9 @@ export default function HomePage() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom + 16;
 
+  const fmtDownloads = (n: number) =>
+    n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+
   return (
     <View style={{ flex: 1, backgroundColor: '#0a0a0a' }}>
       <View style={[styles.header, { paddingTop: topPad + 16 }]}>
@@ -35,7 +73,7 @@ export default function HomePage() {
           <Image source={require('../assets/images/icon.png')} style={styles.headerLogo} />
           <View style={{ flex: 1 }}>
             <Text style={styles.appName}>RPW BOOSTER</Text>
-            <Text style={styles.appSub}>v1.5.1 · Multi-Tool Suite</Text>
+            <Text style={styles.appSub}>v{APP_VERSION} · Multi-Tool Suite</Text>
           </View>
           <TouchableOpacity
             onPress={() => { router.push('/login'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
@@ -70,6 +108,23 @@ export default function HomePage() {
         contentContainerStyle={{ padding: 20, paddingBottom: botPad }}
         showsVerticalScrollIndicator={false}
       >
+        {hasUpdate && release && (
+          <TouchableOpacity
+            style={styles.updateBanner}
+            onPress={() => Linking.openURL(release.url)}
+            activeOpacity={0.85}
+          >
+            <View style={styles.updateBadge}>
+              <Text style={styles.updateBadgeText}>NEW</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.updateTitle}>Update Available — {release.tag}</Text>
+              <Text style={styles.updateSub}>Tap to download latest APK from GitHub</Text>
+            </View>
+            <Feather name="download" size={18} color="#22c55e" />
+          </TouchableOpacity>
+        )}
+
         <Text style={styles.sectionLabel}>TOOLS</Text>
         {TOOLS.map(tool => (
           <ToolCard
@@ -108,14 +163,30 @@ export default function HomePage() {
             <Text style={styles.statLabel}>Accounts</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={[styles.statNum, { color: '#22c55e' }]}>{TOOLS.length}</Text>
-            <Text style={styles.statLabel}>Tools Active</Text>
+            <Text style={[styles.statNum, { color: '#22c55e' }]}>
+              {release ? fmtDownloads(release.downloads) : TOOLS.length.toString()}
+            </Text>
+            <Text style={styles.statLabel}>{release ? 'Downloads' : 'Tools'}</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={[styles.statNum, { color: '#dc2626' }]}>v1.5.1</Text>
+            <Text style={[styles.statNum, { color: '#2176ff' }]}>v{APP_VERSION}</Text>
             <Text style={styles.statLabel}>Version</Text>
           </View>
         </View>
+
+        {release && (
+          <TouchableOpacity
+            style={styles.downloadRow}
+            onPress={() => Linking.openURL(release.url)}
+            activeOpacity={0.8}
+          >
+            <Feather name="github" size={14} color="#555" />
+            <Text style={styles.downloadText}>
+              {fmtDownloads(release.downloads)} total downloads · {release.tag}
+            </Text>
+            <Feather name="external-link" size={12} color="#555" />
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </View>
   );
@@ -170,4 +241,20 @@ const styles = StyleSheet.create({
   },
   statNum: { fontSize: 20, fontFamily: 'Inter_700Bold', color: '#dc2626', marginBottom: 4 },
   statLabel: { fontSize: 10, fontFamily: 'Inter_400Regular', color: '#555' },
+  updateBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#0a1f0e', borderRadius: 12, borderWidth: 1,
+    borderColor: '#22c55e40', padding: 12, marginBottom: 16,
+  },
+  updateBadge: {
+    backgroundColor: '#22c55e', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2,
+  },
+  updateBadgeText: { fontSize: 9, fontFamily: 'Inter_700Bold', color: '#000', letterSpacing: 0.5 },
+  updateTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: '#22c55e' },
+  updateSub: { fontSize: 10, fontFamily: 'Inter_400Regular', color: '#555', marginTop: 2 },
+  downloadRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center',
+    marginTop: 10, padding: 10,
+  },
+  downloadText: { fontSize: 11, fontFamily: 'Inter_400Regular', color: '#555' },
 });

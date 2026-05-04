@@ -12,7 +12,7 @@ jobs:
 
     env:
       EXPO_NO_TELEMETRY: 1
-      EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || 'https://rpw-booster-api.onrender.com/api/fb' }}
+      EXPO_PUBLIC_API_URL: https://rpw-booster-api.onrender.com/api/fb
 
     steps:
       - name: Checkout repository
@@ -38,15 +38,27 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          cmdline-tools-version: '13.0'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
 
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0
 
-      - name: Expo Prebuild (generate Android native project)
+      - name: Expo Prebuild
         working-directory: artifacts/rpw-mobile
         run: pnpm exec expo prebuild --platform android --no-install --clean
 
-      - name: Optimize build.gradle (arm64-v8a only + R8 minify = smaller APK)
+      - name: Optimize build.gradle (arm64-v8a + R8 minify)
         working-directory: artifacts/rpw-mobile
         run: |
           python3 - << 'PYEOF'
@@ -89,69 +101,58 @@ jobs:
 
       - name: Build arm64-v8a Debug APK
         working-directory: artifacts/rpw-mobile/android
-        run: ./gradlew app:assembleDebug --no-daemon -x lint
+        run: >
+          ./gradlew app:assembleDebug
+          --no-daemon
+          --build-cache
+          --parallel
+          -x lint
+          -x test
+          -x lintDebug
+          -x lintRelease
         env:
-          GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.parallel=false -Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m'
+          GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m -Dkotlin.incremental=false'
 
       - name: Show APK size
         run: |
           APK=$(find artifacts/rpw-mobile/android/app/build/outputs/apk/debug -name "*.apk" | head -1)
-          echo "=== APK Size ==="
           ls -lh "$APK"
           SIZE=$(du -sh "$APK" | cut -f1)
           echo "SIZE=$SIZE" >> $GITHUB_ENV
+          echo "APK_PATH=$APK" >> $GITHUB_ENV
 
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPW-BOOSTER-arm64-debug-${{ github.sha }}
+          name: RPW-BOOSTER-arm64-debug-${{ github.run_number }}
           path: artifacts/rpw-mobile/android/app/build/outputs/apk/debug/
           retention-days: 90
 
-      - name: Build arm64-v8a Release APK (minified, unsigned)
-        working-directory: artifacts/rpw-mobile/android
-        run: ./gradlew app:assembleRelease --no-daemon -x lint
-        continue-on-error: true
-        env:
-          GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.parallel=false -Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m'
-
-      - name: Upload Release APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: RPW-BOOSTER-arm64-release-unsigned-${{ github.sha }}
-          path: artifacts/rpw-mobile/android/app/build/outputs/apk/release/
-          retention-days: 90
-        continue-on-error: true
-
       - name: Create GitHub Release
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
+          tag_name: v1.5.${{ github.run_number }}
           name: "RPW BOOSTER v1.5.${{ github.run_number }}"
           body: |
             ## RPW BOOSTER — Android APK
 
-            **Version:** 1.5.${{ github.run_number }} (Build #${{ github.run_number }})
+            **Version:** 1.5.${{ github.run_number }} | **Build:** #${{ github.run_number }}
             **Architecture:** arm64-v8a (all modern Android phones)
             **APK Size:** ${{ env.SIZE }}
-            **Commit:** `${{ github.sha }}`
 
             ---
 
-            ### Download
-            ⬇️ **`app-debug.apk`** — tap the file below to download
-
-            ### Install Instructions
-            1. Download `app-debug.apk`
-            2. On your Android: **Settings → Security → Install unknown apps** → Allow
-            3. Open the downloaded APK and tap **Install**
-            4. Open **RPW BOOSTER** → paste your Facebook cookie → Login
+            ### ⬇️ Install Instructions
+            1. Download `app-debug.apk` below
+            2. On your Android: **Settings → Security → Install unknown apps → Allow**
+            3. Open the APK → tap **Install**
+            4. Open **RPW BOOSTER** → paste Facebook cookie → Login
 
             ---
-            *Built automatically via GitHub Actions*
-          files: |
-            artifacts/rpw-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+            *Auto-built via GitHub Actions*
+          files: ${{ env.APK_PATH }}
           draft: false
           prerelease: false
         env:

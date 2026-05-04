@@ -9,9 +9,10 @@ services:
       pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0 &&
       python3 -m pip install --break-system-packages curl-cffi requests &&
       BASE_PATH=/ pnpm --filter @workspace/lara-web run build &&
-      pnpm --filter @workspace/api-server run build
+      pnpm --filter @workspace/api-server run build &&
+      mkdir -p artifacts/api-server/public &&
+      cp -r artifacts/lara-web/dist/public/. artifacts/api-server/public/
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
-    staticPublishPath: artifacts/lara-web/dist/public
     healthCheckPath: /api/healthz
     envVars:
       - key: PORT

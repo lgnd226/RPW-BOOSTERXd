@@ -55,7 +55,7 @@ jobs:
         working-directory: artifacts/rpw-mobile
         run: pnpm exec expo prebuild --platform android --no-install --clean
 
-      - name: Patch build.gradle (arm64-v8a only + R8 minify)
+      - name: Patch build.gradle (arm64-v8a splits + R8 minify)
         working-directory: artifacts/rpw-mobile
         run: |
           python3 - << 'PYEOF'
@@ -65,6 +65,7 @@ jobs:
           with open(path) as f:
               c = f.read()
 
+          # Add ABI splits (DO NOT also add ndk abiFilters — they conflict)
           if "splits {" not in c:
               splits = """
               splits {
@@ -78,14 +79,15 @@ jobs:
           """
               c = c.replace("    buildTypes {", splits + "    buildTypes {", 1)
 
-          if "abiFilters" not in c:
-              c = re.sub(r'(versionCode\s+\d+)', r'\1\n            ndk { abiFilters "arm64-v8a" }', c, count=1)
+          # Remove any existing ndk abiFilters to avoid the conflict error
+          c = re.sub(r'\s*ndk\s*\{[^}]*abiFilters[^}]*\}', '', c)
 
+          # Enable R8 minify
           c = re.sub(r'minifyEnabled\s+false', 'minifyEnabled true', c)
 
           with open(path, "w") as f:
               f.write(c)
-          print("Patched: arm64-v8a + R8 minify")
+          print("Patched: arm64-v8a splits (no conflicting abiFilters) + R8 minify")
           PYEOF
 
       - name: Make gradlew executable
